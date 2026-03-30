@@ -22,6 +22,8 @@ CLIPPER_IMAGE = os.environ.get("CLIPPER_IMAGE", "op-replay-clipper-render")
 SHARED_HOST_DIR = os.environ.get("SHARED_HOST_DIR", os.environ.get("SHARED_DIR", "/app/shared"))
 # Local path inside the web container where the same volume is mounted.
 SHARED_LOCAL_DIR = Path(os.environ.get("SHARED_LOCAL_DIR", "/app/shared"))
+# Host home directory for mounting SSH keys (must be a real host path).
+HOST_HOME_DIR = os.environ.get("HOST_HOME_DIR", str(Path.home()))
 
 VALID_RENDER_TYPES = {
     "ui", "ui-alt", "driver-debug", "forward", "wide",
@@ -110,9 +112,8 @@ def _build_docker_cmd(job: Job, req: ClipRequestBody) -> list[str]:
         # Host networking so the container can reach the device on the LAN.
         cmd.extend(["--network", "host"])
         # Mount the host SSH directory so the container can authenticate.
-        ssh_dir = Path.home() / ".ssh"
-        if ssh_dir.exists():
-            cmd.extend(["-v", f"{ssh_dir}:/root/.ssh:ro"])
+        host_ssh_dir = Path(HOST_HOME_DIR) / ".ssh"
+        cmd.extend(["-v", f"{host_ssh_dir}:/root/.ssh:ro"])
 
     cmd.extend([
         CLIPPER_IMAGE,

@@ -17,6 +17,7 @@ services:
       - CLIPPER_IMAGE=op-replay-clipper-render
       - SHARED_HOST_DIR=${PWD}/shared
       - SHARED_LOCAL_DIR=/app/shared
+      - HOST_HOME_DIR=${HOME}
 
   render:
     build:
