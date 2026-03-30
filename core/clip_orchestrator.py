@@ -61,6 +61,11 @@ class ClipRequest:
     qcam: bool = False
     headless: bool = True
     skip_download: bool = False
+    download_source: str = "connect"
+    device_ip: str | None = None
+
+
+DownloadSource = Literal["connect", "ssh"]
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,8 @@ class ClipPlan:
     openpilot_dir: str
     headless: bool
     qcam: bool
+    download_source: DownloadSource
+    device_ip: str | None
 
 
 @dataclass(frozen=True)
@@ -181,6 +188,8 @@ def build_clip_plan(request: ClipRequest) -> ClipPlan:
         openpilot_dir=request.openpilot_dir,
         headless=request.headless,
         qcam=request.qcam,
+        download_source=request.download_source,
+        device_ip=request.device_ip,
     )
 
 
@@ -191,16 +200,28 @@ def run_clip(request: ClipRequest) -> ClipResult:
         plan.output_path.unlink()
 
     if not request.skip_download:
-        route_downloader.downloadSegments(
-            route_or_segment=plan.route,
-            start_seconds=plan.start_seconds,
-            length=plan.length_seconds,
-            smear_seconds=plan.smear_seconds,
-            data_dir=plan.data_dir,
-            file_types=list(plan.download_file_types),
-            jwt_token=plan.jwt_token,
-            decompress_logs=plan.decompress_logs,
-        )
+        if plan.download_source == "ssh" and plan.device_ip:
+            route_downloader.download_segments_ssh(
+                route_or_segment=plan.route,
+                start_seconds=plan.start_seconds,
+                length=plan.length_seconds,
+                smear_seconds=plan.smear_seconds,
+                data_dir=plan.data_dir,
+                file_types=list(plan.download_file_types),
+                device_ip=plan.device_ip,
+                decompress_logs=plan.decompress_logs,
+            )
+        else:
+            route_downloader.downloadSegments(
+                route_or_segment=plan.route,
+                start_seconds=plan.start_seconds,
+                length=plan.length_seconds,
+                smear_seconds=plan.smear_seconds,
+                data_dir=plan.data_dir,
+                file_types=list(plan.download_file_types),
+                jwt_token=plan.jwt_token,
+                decompress_logs=plan.decompress_logs,
+            )
 
     if is_ui_render_type(plan.render_type):
         ui_result = ui_renderer.render_ui_clip(

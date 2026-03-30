@@ -64,6 +64,8 @@ class ClipRequestBody(BaseModel):
     file_format: str = "auto"
     smear_seconds: int = 3
     jwt_token: str = ""
+    download_source: str = "connect"
+    device_ip: str = ""
 
 
 class JobResponse(BaseModel):
@@ -94,6 +96,7 @@ def _build_docker_cmd(job: Job, req: ClipRequestBody) -> list[str]:
     job_dir.mkdir(parents=True, exist_ok=True)
 
     output_inside = f"/src/shared/{job.job_id}/output.mp4"
+    is_ssh = req.download_source == "ssh"
 
     cmd: list[str] = [
         "docker", "run", "--rm",
@@ -101,20 +104,33 @@ def _build_docker_cmd(job: Job, req: ClipRequestBody) -> list[str]:
         "--gpus", "all",
         "-v", f"{SHARED_HOST_DIR}:/src/shared",
         "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
+    ]
+
+    if is_ssh:
+        # Host networking so the container can reach the device on the LAN.
+        cmd.extend(["--network", "host"])
+        # Mount the host SSH directory so the container can authenticate.
+        ssh_dir = Path.home() / ".ssh"
+        if ssh_dir.exists():
+            cmd.extend(["-v", f"{ssh_dir}:/root/.ssh:ro"])
+
+    cmd.extend([
         CLIPPER_IMAGE,
-        # clip.py args (entrypoint already includes --skip-openpilot-update --skip-openpilot-bootstrap)
         req.render_type,
         req.route,
         "-o", output_inside,
         "-m", str(req.file_size_mb),
         "--file-format", req.file_format,
-    ]
+    ])
 
     if req.render_type in SMEAR_RENDER_TYPES:
         cmd.extend(["--smear-seconds", str(req.smear_seconds)])
 
-    if req.jwt_token:
+    if req.jwt_token and not is_ssh:
         cmd.extend(["-j", req.jwt_token])
+
+    if is_ssh:
+        cmd.extend(["--download-source", "ssh", "--device-ip", req.device_ip])
 
     return cmd
 
@@ -200,6 +216,12 @@ async def create_clip(body: ClipRequestBody) -> dict[str, Any]:
 
     if body.file_size_mb != 0 and not 1 <= body.file_size_mb <= 200:
         raise HTTPException(status_code=422, detail="File size must be between 1 and 200 MB, or 0 for no limit.")
+
+    if body.download_source not in ("connect", "ssh"):
+        raise HTTPException(status_code=422, detail="Download source must be 'connect' or 'ssh'.")
+
+    if body.download_source == "ssh" and not body.device_ip.strip():
+        raise HTTPException(status_code=422, detail="Device IP address is required for SSH downloads.")
 
     if not await _docker_image_exists(CLIPPER_IMAGE):
         raise HTTPException(

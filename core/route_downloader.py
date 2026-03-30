@@ -371,6 +371,153 @@ def downloadSegments(
             raise ValueError(f"Log for segment {segment_id} not found")
 
 
+# ---------------------------------------------------------------------------
+# SSH download from comma device
+# ---------------------------------------------------------------------------
+
+# Maps file_type keys to the actual filenames on the device.
+_SSH_FILE_MAP = {
+    "cameras": "fcamera.hevc",
+    "ecameras": "ecamera.hevc",
+    "dcameras": "dcamera.hevc",
+    "qcameras": "qcamera.ts",
+    "logs": ("rlog.bz2", "rlog.zst"),
+    "qlogs": ("qlog.bz2", "qlog.zst"),
+}
+
+DEVICE_ROUTE_DIR = "/data/media/0/realdata"
+
+
+def _ssh_cmd(device_ip: str) -> list[str]:
+    return [
+        "ssh",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ConnectTimeout=10",
+        f"comma@{device_ip}",
+    ]
+
+
+def _scp_file(device_ip: str, remote_path: str, local_path: Path) -> bool:
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [
+            "scp",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "ConnectTimeout=10",
+            f"comma@{device_ip}:{remote_path}",
+            str(local_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
+def download_segments_ssh(
+    data_dir: Union[str, Path],
+    route_or_segment: str,
+    smear_seconds: int,
+    start_seconds: int,
+    length: int,
+    device_ip: str,
+    file_types: Optional[List[str]] = None,
+    decompress_logs: bool = True,
+):
+    """Download route segments directly from a comma device via SSH."""
+    if file_types is None:
+        file_types = ["cameras", "ecameras", "logs"]
+
+    route = re.sub(r"--\d{,4}+$", "", route_or_segment)
+    route_date = re.sub(r"^[^|]+\|", "", route)
+    print(f"SSH download from {device_ip} for route {route}")
+
+    # Compute segment range
+    actual_start_seconds = max(0, start_seconds - smear_seconds)
+    start_segment = actual_start_seconds // 60
+    end_segment = (start_seconds + length) // 60
+    segment_ids = list(range(start_segment, end_segment + 1))
+
+    # Verify device is reachable
+    check = subprocess.run(
+        _ssh_cmd(device_ip) + ["echo", "ok"],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        detail = check.stderr.strip() or f"exit {check.returncode}"
+        raise ValueError(f"Cannot connect to comma device at {device_ip}: {detail}")
+    print(f"Device at {device_ip} is reachable")
+
+    # List available segments on the device to find the right directory names
+    ls_result = subprocess.run(
+        _ssh_cmd(device_ip) + ["ls", DEVICE_ROUTE_DIR],
+        capture_output=True, text=True,
+    )
+    if ls_result.returncode != 0:
+        raise ValueError(f"Cannot list routes on device: {ls_result.stderr.strip()}")
+
+    device_dirs = ls_result.stdout.strip().splitlines()
+
+    # Download each segment
+    for segment_id in segment_ids:
+        segment_name = f"{route_date}--{segment_id}"
+        if segment_name not in device_dirs:
+            raise ValueError(
+                f"Segment {segment_name} not found on device. "
+                f"Available: {', '.join(d for d in device_dirs if route_date in d)}"
+            )
+
+        segment_dir = Path(data_dir) / segment_name
+        remote_segment = f"{DEVICE_ROUTE_DIR}/{segment_name}"
+
+        for file_type in file_types:
+            filenames = _SSH_FILE_MAP.get(file_type)
+            if filenames is None:
+                continue
+
+            if isinstance(filenames, str):
+                filenames = (filenames,)
+
+            downloaded = False
+            for filename in filenames:
+                local_path = segment_dir / filename
+                if local_path.exists():
+                    print(f"Skipping {segment_name}/{filename} (already exists)")
+                    downloaded = True
+                    break
+
+                remote_path = f"{remote_segment}/{filename}"
+                print(f"Downloading {segment_name}/{filename} from {device_ip}...")
+                if _scp_file(device_ip, remote_path, local_path):
+                    print(f"  OK ({local_path.stat().st_size // 1024} KB)")
+                    downloaded = True
+                    break
+                else:
+                    local_path.unlink(missing_ok=True)
+
+            if not downloaded:
+                raise ValueError(f"Failed to download {file_type} for segment {segment_name} from device")
+
+    # Decompress logs
+    for segment_id in segment_ids:
+        if "logs" not in file_types or not decompress_logs:
+            break
+        segment_dir = Path(data_dir) / f"{route_date}--{segment_id}"
+        if (segment_dir / "rlog").exists():
+            print(f"Skipping decompression of segment {segment_id} (already decompressed)")
+            continue
+        log_path = segment_dir / "rlog.bz2"
+        if log_path.exists():
+            subprocess.run(["bzip2", "-d", str(log_path)], check=True)
+            continue
+        log_path = segment_dir / "rlog.zst"
+        if log_path.exists():
+            subprocess.run(["zstd", "-d", str(log_path)], check=True)
+            continue
+        raise ValueError(f"Log for segment {segment_id} not found after SSH download")
+
+    print(f"SSH download complete: {len(segment_ids)} segments")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download openpilot routes/segments.")
     parser.add_argument("data_dir", type=str, help="Directory to download files to")

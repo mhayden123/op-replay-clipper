@@ -60,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data-dir", default="", help="Explicit data dir. If unset, uses --data-root/<dongle-id>.")
     parser.add_argument("--skip-download", action="store_true", help="Reuse already-downloaded route data.")
     parser.add_argument("--accel", choices=["auto", "cpu", "videotoolbox", "nvidia"], default="auto")
+    parser.add_argument("--download-source", choices=["connect", "ssh"], default="connect", help="Download route data from Comma Connect or via SSH from the device.")
+    parser.add_argument("--device-ip", default="", help="IP address of the comma device (required when --download-source=ssh).")
     return parser
 
 
@@ -129,6 +131,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 qcam=args.qcam,
                 headless=not args.windowed,
                 skip_download=args.skip_download,
+                download_source=args.download_source,
+                device_ip=args.device_ip or None,
             )
         )
     except ModuleNotFoundError as error:

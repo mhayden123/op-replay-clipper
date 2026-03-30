@@ -374,9 +374,23 @@
 
   <div class="card">
     <div class="field">
+      <label>Download Source</label>
+      <div class="pills" id="downloadSourcePills">
+        <button class="pill active" data-value="connect">Comma Connect</button>
+        <button class="pill" data-value="ssh">Local SSH</button>
+      </div>
+    </div>
+
+    <div class="field" id="deviceIpField" style="display:none;">
+      <label for="deviceIp">Device IP Address</label>
+      <input type="text" id="deviceIp" placeholder="e.g. 192.168.1.11 or 10.42.0.254" autocomplete="off" spellcheck="false">
+      <div class="hint">IP address of your comma device on the local network.</div>
+    </div>
+
+    <div class="field">
       <label for="route">Route URL</label>
       <input type="text" id="route" placeholder="https://connect.comma.ai/dongle/route/start/end" autocomplete="off" spellcheck="false">
-      <div class="hint">Paste a connect.comma.ai URL with start/end times, or a pipe-delimited route ID.</div>
+      <div class="hint" id="routeHint">Paste a connect.comma.ai URL with start/end times, or a pipe-delimited route ID.</div>
     </div>
 
     <div class="field">
@@ -422,7 +436,7 @@
       <div class="hint">Hidden preroll to initialize UI state before the clip starts.</div>
     </div>
 
-    <div class="field">
+    <div class="field" id="jwtField">
       <label for="jwtToken">JWT Token (optional)</label>
       <input type="password" id="jwtToken" placeholder="For private routes without Public Access" autocomplete="off">
       <div class="hint">Get one from jwt.comma.ai. Not needed if Public Access is enabled.</div>
@@ -481,6 +495,7 @@
     "360_forward_upon_wide": "8K 360 with forward projected onto wide. Large output for reframing.",
   };
   let currentRenderType = "ui";
+  let currentDownloadSource = "connect";
   let currentJobId = null;
   let eventSource = null;
 
@@ -503,6 +518,21 @@
     document.getElementById("warningText").textContent = message;
     banner.classList.add("visible");
   }
+
+  // Download source toggle
+  document.getElementById("downloadSourcePills").addEventListener("click", (e) => {
+    const pill = e.target.closest(".pill");
+    if (!pill) return;
+    document.querySelectorAll("#downloadSourcePills .pill").forEach(p => p.classList.remove("active"));
+    pill.classList.add("active");
+    currentDownloadSource = pill.dataset.value;
+    const isSSH = currentDownloadSource === "ssh";
+    document.getElementById("deviceIpField").style.display = isSSH ? "block" : "none";
+    document.getElementById("jwtField").style.display = isSSH ? "none" : "block";
+    document.getElementById("routeHint").textContent = isSSH
+      ? "Paste a connect URL or route ID. The app will parse the ID and download the files directly via SSH."
+      : "Paste a connect.comma.ai URL with start/end times, or a pipe-delimited route ID.";
+  });
 
   // Pill selection
   document.getElementById("renderTypePills").addEventListener("click", (e) => {
@@ -586,7 +616,16 @@
       file_format: document.getElementById("fileFormat").value,
       smear_seconds: parseInt(document.getElementById("smearSeconds").value) || 3,
       jwt_token: document.getElementById("jwtToken").value.trim(),
+      download_source: currentDownloadSource,
+      device_ip: document.getElementById("deviceIp").value.trim(),
     };
+
+    if (currentDownloadSource === "ssh" && !body.device_ip) {
+      showError("Device IP address is required for SSH downloads.");
+      document.getElementById("deviceIp").focus();
+      setRendering(false);
+      return;
+    }
 
     try {
       const res = await fetch("/api/clip", {
