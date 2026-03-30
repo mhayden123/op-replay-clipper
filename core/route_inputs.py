@@ -269,6 +269,13 @@ def parseRouteOrUrl(
     if not parsed_url.hostname == "connect.comma.ai":
         raise ValueError("Invalid hostname in URL")
 
+    # 2-segment: /dongle/route-name — no start/end times in URL
+    if len(url_parts) == 3:
+        dongle_id = url_parts[1]
+        segment_name = url_parts[2]
+        route = f"{dongle_id}|{segment_name}"
+        return ParsedRouteOrURL(route, start_seconds, length_seconds)
+
     # Check if the path has 3 parts
     if len(url_parts) == 4 and "-" not in url_parts[2]:
         return parseAbsoluteTimeUrl(route_or_url, start_seconds, length_seconds, jwt_token)
