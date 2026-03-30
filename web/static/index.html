@@ -51,6 +51,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding-top: 32px;
+    padding-bottom: 24px;
     min-height: 0;
   }
   .scroll-area::-webkit-scrollbar { width: 5px; }
@@ -67,15 +68,33 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 36px;
+    margin-bottom: 28px;
   }
-  .header h1 {
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .header-icon {
+    flex-shrink: 0;
+    color: var(--accent);
+  }
+  .header-text h1 {
     font-size: 20px;
     font-weight: 700;
     letter-spacing: -0.4px;
     color: #fff;
+    line-height: 1.2;
+  }
+  .header-text .subtitle {
+    font-size: 12px;
+    color: var(--text-muted);
+    opacity: 0.6;
+    margin-top: 2px;
+    letter-spacing: 0.1px;
   }
   .header .badge {
+    flex-shrink: 0;
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
@@ -111,7 +130,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 32px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
   }
 
   /* Form fields */
@@ -382,7 +401,22 @@
 <div class="container">
   <div class="scroll-area">
     <div class="header">
-      <h1>OP Replay Clipper</h1>
+      <div class="header-left">
+        <svg class="header-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+          <line x1="7" y1="2" x2="7" y2="22"/>
+          <line x1="17" y1="2" x2="17" y2="22"/>
+          <line x1="2" y1="12" x2="22" y2="12"/>
+          <line x1="2" y1="7" x2="7" y2="7"/>
+          <line x1="2" y1="17" x2="7" y2="17"/>
+          <line x1="17" y1="7" x2="22" y2="7"/>
+          <line x1="17" y1="17" x2="22" y2="17"/>
+        </svg>
+        <div class="header-text">
+          <h1>OP Replay Clipper</h1>
+          <div class="subtitle">Extract and render comma.ai drive segments</div>
+        </div>
+      </div>
       <span class="badge">Local</span>
     </div>
 
