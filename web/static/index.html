@@ -563,12 +563,12 @@
         <span class="icon">&#10007;</span>
         <span id="errorText">Render Failed</span>
       </div>
-      <a class="btn-download" id="downloadLink" href="#" style="display:none;">
+      <button class="btn-download" id="downloadLink" style="display:none;" onclick="downloadClip()">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
         </svg>
         Download MP4
-      </a>
+      </button>
     </div>
 
     <div class="progress-footer">
@@ -793,17 +793,31 @@
     area.style.display = "block";
     document.getElementById("successBanner").style.display = "flex";
 
-    const videoUrl = "/api/clip/" + jobId + "/download";
-
-    const dl = document.getElementById("downloadLink");
-    dl.href = videoUrl;
-    dl.download = "clip-" + jobId + ".mp4";
-    dl.style.display = "inline-flex";
+    window._clipDownloadUrl = "/api/clip/" + jobId + "/download";
+    window._clipFilename = "clip-" + jobId + ".mp4";
+    document.getElementById("downloadLink").style.display = "inline-flex";
 
     const back = document.getElementById("btnBack");
     back.style.display = "flex";
     back.className = "btn-secondary";
     document.getElementById("btnBackText").textContent = "New Render";
+  }
+
+  async function downloadClip() {
+    try {
+      const res = await fetch(window._clipDownloadUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = window._clipFilename || "clip.mp4";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(window._clipDownloadUrl, "_blank");
+    }
   }
 
   function onRenderFail(message) {
