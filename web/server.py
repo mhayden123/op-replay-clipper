@@ -157,7 +157,11 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
         exit_code = await proc.wait()
 
         output_path = SHARED_LOCAL_DIR / job.job_id / "output.mp4"
-        if exit_code == 0 and output_path.exists():
+        # Brief delay for filesystem sync after container exits
+        await asyncio.sleep(1)
+        file_found = output_path.exists()
+        file_size = output_path.stat().st_size if file_found else 0
+        if exit_code == 0 and file_found and file_size > 0:
             job.state = JobState.done
             job.output_path = str(output_path)
             job.logs.append("Render complete.")
@@ -165,6 +169,12 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
             job.state = JobState.failed
             job.error = f"Container exited with code {exit_code}"
             job.logs.append(f"ERROR: {job.error}")
+            job.logs.append(f"DEBUG: output_path={output_path}, exists={file_found}, size={file_size}")
+            # List what's actually in the job directory for debugging
+            job_dir = SHARED_LOCAL_DIR / job.job_id
+            if job_dir.exists():
+                contents = list(job_dir.iterdir())
+                job.logs.append(f"DEBUG: job_dir contents={[f.name for f in contents]}")
     except FileNotFoundError:
         job.state = JobState.failed
         job.error = "Docker CLI not found. Is Docker installed?"
