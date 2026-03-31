@@ -387,15 +387,6 @@
   }
   .result-banner .icon { font-size: 18px; }
 
-  .video-wrapper {
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    border: 1px solid var(--border);
-    margin-bottom: 12px;
-    background: #000;
-  }
-  .video-wrapper video { width: 100%; display: block; }
-
   .btn-download {
     display: inline-flex;
     align-items: center;
@@ -572,9 +563,6 @@
         <span class="icon">&#10007;</span>
         <span id="errorText">Render Failed</span>
       </div>
-      <div id="videoWrapper" class="video-wrapper" style="display:none;">
-        <video id="videoPlayer" controls></video>
-      </div>
       <a class="btn-download" id="downloadLink" href="#" style="display:none;">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
@@ -694,7 +682,6 @@
     document.getElementById("resultArea").style.display = "none";
     document.getElementById("successBanner").style.display = "none";
     document.getElementById("errorBanner").style.display = "none";
-    document.getElementById("videoWrapper").style.display = "none";
     document.getElementById("downloadLink").style.display = "none";
     document.getElementById("btnBack").style.display = "flex";
     document.getElementById("btnBackText").textContent = "Cancel";
@@ -807,8 +794,6 @@
     document.getElementById("successBanner").style.display = "flex";
 
     const videoUrl = "/api/clip/" + jobId + "/download";
-    document.getElementById("videoPlayer").src = videoUrl;
-    document.getElementById("videoWrapper").style.display = "block";
 
     const dl = document.getElementById("downloadLink");
     dl.href = videoUrl;
