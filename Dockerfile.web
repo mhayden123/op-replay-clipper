@@ -6,7 +6,7 @@ RUN apt-get update -y && \
     curl -fsSL https://get.docker.com | sh && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir fastapi uvicorn[standard]
+RUN pip install --no-cache-dir fastapi uvicorn[standard] requests
 
 WORKDIR /app
 COPY web/ web/

@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import requests as http_requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
@@ -43,6 +48,24 @@ class JobState(str, Enum):
     failed = "failed"
 
 
+_FFMPEG_PROGRESS_RE = re.compile(
+    r"(?:frame=\s*(\d+))?\s*"
+    r"(?:fps=\s*([\d.]+))?\s*"
+    r"(?:.*?size=\s*(\d+)kB)?\s*"
+    r"(?:.*?time=\s*([\d:.]+))?\s*"
+    r"(?:.*?bitrate=\s*([\d.]+)kbits/s)?\s*"
+    r"(?:.*?speed=\s*([\d.]+)x)?"
+)
+
+
+def _parse_ffmpeg_time(t: str) -> float:
+    """Convert HH:MM:SS.ss to seconds."""
+    parts = t.split(":")
+    if len(parts) == 3:
+        return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+    return 0.0
+
+
 @dataclass
 class Job:
     job_id: str
@@ -50,6 +73,7 @@ class Job:
     logs: list[str] = field(default_factory=list)
     output_path: str = ""
     error: str = ""
+    progress: dict[str, Any] = field(default_factory=dict)
 
 
 JOBS: dict[str, Job] = {}
@@ -154,6 +178,22 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
             line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
             job.logs.append(line)
 
+            # Parse ffmpeg progress lines
+            if line.startswith("frame="):
+                m = _FFMPEG_PROGRESS_RE.match(line)
+                if m:
+                    progress: dict[str, Any] = {}
+                    if m.group(3):
+                        progress["size_kb"] = int(m.group(3))
+                    if m.group(4):
+                        progress["time_seconds"] = round(_parse_ffmpeg_time(m.group(4)), 1)
+                    if m.group(5):
+                        progress["bitrate_kbps"] = float(m.group(5))
+                    if m.group(6):
+                        progress["speed"] = float(m.group(6))
+                    if progress:
+                        job.progress = progress
+
         exit_code = await proc.wait()
 
         output_path = SHARED_LOCAL_DIR / job.job_id / "output.mp4"
@@ -203,6 +243,88 @@ async def health() -> dict[str, Any]:
         "docker": docker_ok,
         "image": image_ok,
         "image_name": CLIPPER_IMAGE,
+    }
+
+
+class EstimateRequest(BaseModel):
+    route: str
+    file_size_mb: int = 9
+    jwt_token: str = ""
+    download_source: str = "connect"
+
+
+def _resolve_route_duration(route_url: str, jwt_token: str = "") -> int | None:
+    """Resolve the duration in seconds from a route URL. Returns None on failure."""
+    route_url = route_url.strip()
+
+    # Pipe-delimited route with no timing — can't resolve without API context
+    if "|" in route_url and not route_url.startswith("http"):
+        return None
+
+    if not route_url.startswith("https://connect.comma.ai/"):
+        return None
+
+    parsed = urlparse(route_url)
+    parts = parsed.path.split("/")
+
+    # /dongle/start_ms/end_ms (absolute time)
+    if len(parts) == 4 and "-" not in parts[2]:
+        try:
+            start_ms = int(parts[2])
+            end_ms = int(parts[3])
+            return max(1, (end_ms - start_ms) // 1000)
+        except ValueError:
+            return None
+
+    # /dongle/route-name/start/end (relative time)
+    if len(parts) == 5 and "-" in parts[2]:
+        try:
+            return max(1, int(parts[4]) - int(parts[3]))
+        except ValueError:
+            return None
+
+    # /dongle/route-name (full route — needs API lookup)
+    if len(parts) == 3:
+        dongle_id = parts[1]
+        segment_name = parts[2]
+        route = f"{dongle_id}|{segment_name}"
+        try:
+            end_ms = int(time.time() * 1000) + 86_400_000
+            api_url = f"https://api.comma.ai/v1/devices/{dongle_id}/routes_segments?end={end_ms}&start=0"
+            headers = {"Authorization": f"JWT {jwt_token}"} if jwt_token else {}
+            resp = http_requests.get(api_url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return None
+            for r in resp.json():
+                if r.get("fullname") == route:
+                    return max(1, (r["end_time_utc_millis"] - r["start_time_utc_millis"]) // 1000)
+        except Exception:
+            return None
+
+    return None
+
+
+@app.post("/api/estimate")
+async def estimate(body: EstimateRequest) -> dict[str, Any]:
+    """Estimate output file size and route duration without starting a render."""
+    if body.download_source == "ssh":
+        return {"duration_seconds": None, "estimated_mb": None, "bitrate_kbps": None, "note": "Duration unknown for SSH routes"}
+
+    duration = await asyncio.get_event_loop().run_in_executor(
+        None, _resolve_route_duration, body.route, body.jwt_token
+    )
+    if duration is None:
+        return {"duration_seconds": None, "estimated_mb": None, "bitrate_kbps": None}
+
+    if body.file_size_mb <= 0:
+        return {"duration_seconds": duration, "estimated_mb": None, "bitrate_kbps": None, "note": "Max quality (file size varies)"}
+
+    bitrate_bps = body.file_size_mb * 8 * 1024 * 1024 // duration
+    bitrate_kbps = round(bitrate_bps / 1000, 1)
+    return {
+        "duration_seconds": duration,
+        "estimated_mb": body.file_size_mb,
+        "bitrate_kbps": bitrate_kbps,
     }
 
 
@@ -271,11 +393,17 @@ async def stream_status(job_id: str) -> StreamingResponse:
 
     async def event_stream():
         sent = 0
+        last_progress = {}
         while True:
             while sent < len(job.logs):
                 line = job.logs[sent]
                 yield f"data: {line}\n\n"
                 sent += 1
+
+            # Emit progress updates if changed
+            if job.progress and job.progress != last_progress:
+                last_progress = dict(job.progress)
+                yield f"event: progress\ndata: {json.dumps(last_progress)}\n\n"
 
             if job.state in (JobState.done, JobState.failed):
                 yield f"event: state\ndata: {job.state.value}\n\n"

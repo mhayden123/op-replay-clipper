@@ -475,6 +475,7 @@
           <label for="route">Route URL</label>
           <input type="text" id="route" placeholder="https://connect.comma.ai/dongle/route/start/end" autocomplete="off" spellcheck="false">
           <div class="hint" id="routeHint">Paste a connect.comma.ai URL with start/end times, or a pipe-delimited route ID.</div>
+          <div id="estimateBox" style="display:none;margin-top:8px;padding:8px 12px;border-radius:6px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.12);font-size:12px;color:var(--accent);"></div>
         </div>
 
         <div class="field">
@@ -551,6 +552,9 @@
 
     <div class="progress-bar-track">
       <div class="progress-bar-fill" id="progressBar"></div>
+    </div>
+
+    <div id="progressStats" style="display:none;padding:8px 14px;margin-bottom:12px;border-radius:6px;background:rgba(255,255,255,0.03);font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:11px;color:var(--text-muted);display:none;">
     </div>
 
     <div class="terminal" id="logBox"></div>
@@ -672,6 +676,58 @@
     smearField.classList.toggle("visible", SMEAR_TYPES.has(currentRenderType));
   });
 
+  // ===== Route estimate =====
+  let estimateTimer = null;
+  let lastEstimateRoute = "";
+
+  function fetchEstimate() {
+    const route = document.getElementById("route").value.trim();
+    const fileSizeMb = document.getElementById("noLimit").checked ? 0 : (parseInt(document.getElementById("fileSize").value) || 9);
+    const jwtToken = document.getElementById("jwtToken").value.trim();
+    const box = document.getElementById("estimateBox");
+
+    if (!route || route === lastEstimateRoute) return;
+    if (!route.startsWith("https://connect.comma.ai/") && !route.includes("|")) {
+      box.style.display = "none";
+      return;
+    }
+
+    lastEstimateRoute = route;
+    box.style.display = "block";
+    box.textContent = "Resolving route...";
+
+    fetch("/api/estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ route, file_size_mb: fileSizeMb, jwt_token: jwtToken, download_source: currentDownloadSource }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.duration_seconds == null) {
+          box.style.display = data.note ? "block" : "none";
+          box.textContent = data.note || "";
+          return;
+        }
+        const mins = Math.floor(data.duration_seconds / 60);
+        const secs = data.duration_seconds % 60;
+        const dur = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+        if (data.estimated_mb == null) {
+          box.textContent = `Route duration: ${dur} — Max quality (file size varies)`;
+        } else {
+          box.textContent = `Route duration: ${dur} — Estimated output: ~${data.estimated_mb} MB at ${data.bitrate_kbps} Kbps`;
+        }
+      })
+      .catch(() => { box.style.display = "none"; });
+  }
+
+  document.getElementById("route").addEventListener("input", () => {
+    lastEstimateRoute = "";
+    clearTimeout(estimateTimer);
+    estimateTimer = setTimeout(fetchEstimate, 600);
+  });
+  document.getElementById("fileSize").addEventListener("input", () => { lastEstimateRoute = ""; fetchEstimate(); });
+  document.getElementById("noLimit").addEventListener("change", () => { lastEstimateRoute = ""; fetchEstimate(); });
+
   function toggleNoLimit(checked) {
     const el = document.getElementById("fileSize");
     el.disabled = checked;
@@ -686,6 +742,8 @@
     const bar = document.getElementById("progressBar");
     bar.className = "progress-bar-fill";
     bar.style.width = "30%";
+    document.getElementById("progressStats").style.display = "none";
+    document.getElementById("progressStats").textContent = "";
     document.getElementById("resultArea").style.display = "none";
     document.getElementById("successBanner").style.display = "none";
     document.getElementById("errorBanner").style.display = "none";
@@ -767,9 +825,28 @@
     }
   }
 
+  function formatSize(kb) {
+    return kb >= 1024 ? (kb / 1024).toFixed(1) + " MB" : kb + " KB";
+  }
+
   function streamLogs(jobId) {
     eventSource = new EventSource("/api/clip/" + jobId + "/status");
     eventSource.onmessage = (e) => appendLog(e.data);
+    eventSource.addEventListener("progress", (e) => {
+      try {
+        const p = JSON.parse(e.data);
+        const stats = document.getElementById("progressStats");
+        const parts = [];
+        if (p.size_kb != null) parts.push("Size: " + formatSize(p.size_kb));
+        if (p.time_seconds != null) parts.push("Time: " + Math.round(p.time_seconds) + "s");
+        if (p.bitrate_kbps != null) parts.push("Bitrate: " + (p.bitrate_kbps / 1000).toFixed(1) + " Mbps");
+        if (p.speed != null) parts.push("Speed: " + p.speed.toFixed(1) + "x");
+        if (parts.length) {
+          stats.textContent = parts.join("  |  ");
+          stats.style.display = "block";
+        }
+      } catch {}
+    });
     eventSource.addEventListener("state", (e) => {
       eventSource.close();
       eventSource = null;
