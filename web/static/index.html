@@ -51,7 +51,7 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding-top: 32px;
-    padding-bottom: 24px;
+    padding-bottom: 0;
     min-height: 0;
   }
   .scroll-area::-webkit-scrollbar { width: 5px; }
@@ -60,7 +60,7 @@
 
   .footer {
     flex-shrink: 0;
-    padding: 16px 0 24px;
+    padding: 0 0 24px;
   }
 
   /* Header */
@@ -133,8 +133,11 @@
     margin-bottom: 0;
     position: relative;
     z-index: 2;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.2);
-    transition: border-radius 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: border-radius 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                border-bottom-color 0.4s ease;
+  }
+  .card.log-active {
+    border-bottom-color: transparent;
   }
 
   /* Form fields */
@@ -280,47 +283,25 @@
     opacity: 0;
     overflow: hidden;
     transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 0.3s ease;
+                opacity 0.3s ease,
+                padding 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     z-index: 1;
-    background: #08090e;
+    background: var(--surface);
     border-left: 1px solid var(--border);
     border-right: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
-    border-top: 1px solid rgba(255,255,255,0.03);
+    border-top: none;
     border-radius: 0 0 var(--radius) var(--radius);
-    padding: 0 20px;
-    box-shadow: inset 0 4px 15px rgba(0,0,0,0.6);
-    margin-bottom: 0;
+    padding: 0 32px;
+    box-shadow: inset 0 6px 10px -4px rgba(0,0,0,0.4);
+    margin: 0;
   }
   .log-section.visible {
     max-height: 280px;
     opacity: 1;
-    padding: 16px 20px 20px;
+    padding: 16px 32px 20px;
     margin-bottom: 14px;
-  }
-  .log-section::before,
-  .log-section::after {
-    content: "";
-    position: absolute;
-    top: -12px;
-    width: 12px;
-    height: 12px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.3s ease;
-  }
-  .log-section.visible::before,
-  .log-section.visible::after {
-    opacity: 1;
-  }
-  .log-section::before {
-    left: -1px;
-    background: radial-gradient(circle at 100% 0%, transparent 12px, var(--bg) 12px);
-  }
-  .log-section::after {
-    right: -1px;
-    background: radial-gradient(circle at 0% 0%, transparent 12px, var(--bg) 12px);
   }
 
   .log-header {
@@ -684,6 +665,7 @@
     document.getElementById("logSection").classList.remove("visible");
     document.getElementById("resultSection").classList.remove("visible");
     document.querySelector(".card").style.borderRadius = "";
+    document.querySelector(".card").classList.remove("log-active");
     document.getElementById("successBanner").style.display = "none";
     document.getElementById("errorBanner").style.display = "none";
     document.getElementById("videoWrapper").style.display = "none";
@@ -723,6 +705,7 @@
     setRendering(true);
     document.getElementById("logSection").classList.add("visible");
     document.querySelector(".card").style.borderRadius = "var(--radius) var(--radius) 0 0";
+    document.querySelector(".card").classList.add("log-active");
 
     const body = {
       route: route,
