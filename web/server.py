@@ -29,6 +29,8 @@ SHARED_HOST_DIR = os.environ.get("SHARED_HOST_DIR", os.environ.get("SHARED_DIR",
 SHARED_LOCAL_DIR = Path(os.environ.get("SHARED_LOCAL_DIR", "/app/shared"))
 # Host home directory for mounting SSH keys (must be a real host path).
 HOST_HOME_DIR = os.environ.get("HOST_HOME_DIR", str(Path.home()))
+# Whether the host has an NVIDIA GPU (set to "false" by the desktop app on macOS).
+HAS_GPU = os.environ.get("HAS_GPU", "true").lower() != "false"
 
 VALID_RENDER_TYPES = {
     "ui", "ui-alt", "driver-debug", "forward", "wide",
@@ -127,10 +129,12 @@ def _build_docker_cmd(job: Job, req: ClipRequestBody) -> list[str]:
     cmd: list[str] = [
         "docker", "run", "--rm",
         "--shm-size=1g",
-        "--gpus", "all",
-        "-v", f"{SHARED_HOST_DIR}:/src/shared",
-        "-e", "NVIDIA_DRIVER_CAPABILITIES=all",
     ]
+
+    if HAS_GPU:
+        cmd.extend(["--gpus", "all", "-e", "NVIDIA_DRIVER_CAPABILITIES=all"])
+
+    cmd.extend(["-v", f"{SHARED_HOST_DIR}:/src/shared"])
 
     if is_ssh:
         # Host networking so the container can reach the device on the LAN.
