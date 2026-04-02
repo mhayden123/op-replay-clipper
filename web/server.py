@@ -249,6 +249,13 @@ def _detect_subnets() -> list[str]:
     """Detect LAN subnets to scan. Returns list of /24 base IPs like '192.168.1.'."""
     bases: set[str] = set()
 
+    # Best source: HOST_LAN_IP env var set by the desktop app or docker-compose
+    host_lan_ip = os.environ.get("HOST_LAN_IP", "")
+    if host_lan_ip and not host_lan_ip.startswith("127.") and not host_lan_ip.startswith("172."):
+        prefix = host_lan_ip.rsplit(".", 1)[0] + "."
+        bases.add(prefix)
+        log.info("HOST_LAN_IP=%s → subnet %s", host_lan_ip, prefix)
+
     # Docker Desktop (macOS/Windows): resolve host.docker.internal
     try:
         host_ip = socket.gethostbyname("host.docker.internal")
@@ -258,33 +265,34 @@ def _detect_subnets() -> list[str]:
     except socket.gaierror:
         log.info("host.docker.internal not available")
 
-    # Linux: parse /proc/net/route for default gateway
+    # When running directly on the host (not in Docker), detect via UDP trick
     try:
-        with open("/proc/net/route") as f:
-            for line in f:
-                fields = line.strip().split()
-                if len(fields) >= 3 and fields[1] == "00000000":
-                    gw_hex = fields[2]
-                    gw_bytes = struct.pack("<I", int(gw_hex, 16))
-                    gw_ip = socket.inet_ntoa(gw_bytes)
-                    prefix = gw_ip.rsplit(".", 1)[0] + "."
-                    bases.add(prefix)
-                    log.info("Default gateway: %s → subnet %s", gw_ip, prefix)
-                    break
-    except (FileNotFoundError, ValueError):
-        pass
-
-    # Also check the container's own IP interfaces
-    try:
-        hostname = socket.gethostname()
-        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
-            ip = info[4][0]
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 53))
+            ip = s.getsockname()[0]
             if not ip.startswith("127.") and not ip.startswith("172."):
                 prefix = ip.rsplit(".", 1)[0] + "."
                 bases.add(prefix)
-                log.info("Interface IP: %s → subnet %s", ip, prefix)
-    except socket.gaierror:
+                log.info("UDP route detection: %s → subnet %s", ip, prefix)
+    except OSError:
         pass
+
+    # Fallback: parse /proc/net/route for default gateway (may be Docker bridge inside container)
+    if not bases:
+        try:
+            with open("/proc/net/route") as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        gw_hex = fields[2]
+                        gw_bytes = struct.pack("<I", int(gw_hex, 16))
+                        gw_ip = socket.inet_ntoa(gw_bytes)
+                        prefix = gw_ip.rsplit(".", 1)[0] + "."
+                        bases.add(prefix)
+                        log.info("Default gateway (fallback): %s → subnet %s", gw_ip, prefix)
+                        break
+        except (FileNotFoundError, ValueError):
+            pass
 
     log.info("Subnets to scan: %s", list(bases))
     return list(bases) if bases else []

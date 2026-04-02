@@ -18,6 +18,7 @@ services:
       - SHARED_HOST_DIR=${PWD}/shared
       - SHARED_LOCAL_DIR=/app/shared
       - HOST_HOME_DIR=${HOME}
+      - HOST_LAN_IP=${HOST_LAN_IP:-}
 
   render:
     build:
