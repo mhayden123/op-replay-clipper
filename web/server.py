@@ -9,7 +9,6 @@ import os
 import re
 import shutil
 import socket
-import struct
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -241,61 +240,38 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
 # ---------------------------------------------------------------------------
 
 _SCAN_PORTS = [8022, 22]  # comma 3X on 8022, comma 4 on 22
-_SCAN_TIMEOUT = 1.0
+_SCAN_TIMEOUT = 0.5
 _DEVICE_TYPE = {8022: "comma 3X", 22: "comma 4"}
 
 
-def _detect_subnets() -> list[str]:
-    """Detect LAN subnets to scan. Returns list of /24 base IPs like '192.168.1.'."""
-    bases: set[str] = set()
-
+def _detect_subnet() -> str | None:
+    """Detect the LAN subnet to scan. Returns a /24 base like '192.168.1.' or None."""
     # Best source: HOST_LAN_IP env var set by the desktop app or docker-compose
     host_lan_ip = os.environ.get("HOST_LAN_IP", "")
     if host_lan_ip and not host_lan_ip.startswith("127.") and not host_lan_ip.startswith("172."):
-        prefix = host_lan_ip.rsplit(".", 1)[0] + "."
-        bases.add(prefix)
-        log.info("HOST_LAN_IP=%s → subnet %s", host_lan_ip, prefix)
+        log.info("HOST_LAN_IP=%s", host_lan_ip)
+        return host_lan_ip.rsplit(".", 1)[0] + "."
 
     # Docker Desktop (macOS/Windows): resolve host.docker.internal
     try:
         host_ip = socket.gethostbyname("host.docker.internal")
-        prefix = host_ip.rsplit(".", 1)[0] + "."
-        bases.add(prefix)
-        log.info("host.docker.internal resolved to %s → subnet %s", host_ip, prefix)
+        log.info("host.docker.internal=%s", host_ip)
+        return host_ip.rsplit(".", 1)[0] + "."
     except socket.gaierror:
-        log.info("host.docker.internal not available")
+        pass
 
-    # When running directly on the host (not in Docker), detect via UDP trick
+    # Direct host: detect via UDP route
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 53))
             ip = s.getsockname()[0]
             if not ip.startswith("127.") and not ip.startswith("172."):
-                prefix = ip.rsplit(".", 1)[0] + "."
-                bases.add(prefix)
-                log.info("UDP route detection: %s → subnet %s", ip, prefix)
+                log.info("UDP route=%s", ip)
+                return ip.rsplit(".", 1)[0] + "."
     except OSError:
         pass
 
-    # Fallback: parse /proc/net/route for default gateway (may be Docker bridge inside container)
-    if not bases:
-        try:
-            with open("/proc/net/route") as f:
-                for line in f:
-                    fields = line.strip().split()
-                    if len(fields) >= 3 and fields[1] == "00000000":
-                        gw_hex = fields[2]
-                        gw_bytes = struct.pack("<I", int(gw_hex, 16))
-                        gw_ip = socket.inet_ntoa(gw_bytes)
-                        prefix = gw_ip.rsplit(".", 1)[0] + "."
-                        bases.add(prefix)
-                        log.info("Default gateway (fallback): %s → subnet %s", gw_ip, prefix)
-                        break
-        except (FileNotFoundError, ValueError):
-            pass
-
-    log.info("Subnets to scan: %s", list(bases))
-    return list(bases) if bases else []
+    return None
 
 
 def _check_port(ip: str, port: int) -> dict[str, Any] | None:
@@ -305,7 +281,6 @@ def _check_port(ip: str, port: int) -> dict[str, Any] | None:
             s.settimeout(_SCAN_TIMEOUT)
             banner = s.recv(256).decode("utf-8", errors="replace").strip()
             if "SSH" in banner.upper():
-                log.info("FOUND device at %s:%d — %s", ip, port, banner)
                 return {"ip": ip, "port": port, "device_type": _DEVICE_TYPE.get(port, "unknown"), "banner": banner}
     except (OSError, socket.timeout):
         pass
@@ -313,45 +288,36 @@ def _check_port(ip: str, port: int) -> dict[str, Any] | None:
 
 
 def _scan_for_devices() -> dict[str, Any]:
-    """Scan LAN for comma devices using low concurrency for Docker NAT reliability."""
-    scan_log: list[str] = []
+    """Scan LAN for comma devices. Scans common DHCP range first for speed."""
     start_time = time.time()
 
-    subnets = _detect_subnets()
-    scan_log.append(f"Detected subnets: {subnets}")
-    if not subnets:
-        scan_log.append("ERROR: No subnets detected")
-        return {"devices": [], "subnets_scanned": [], "scan_log": scan_log,
-                "error": "Could not detect local network subnet."}
+    subnet = _detect_subnet()
+    if not subnet:
+        log.warning("Could not detect LAN subnet")
+        return {"devices": [], "error": "Could not detect local network subnet."}
 
-    devices: list[dict[str, Any]] = []
+    log.info("Scanning subnet %s0/24", subnet)
 
     # Scan common DHCP range first (2-50), then the rest
     ip_order = list(range(2, 51)) + list(range(51, 255)) + [1]
+    targets = [(f"{subnet}{i}", port) for i in ip_order for port in _SCAN_PORTS]
 
-    for base in subnets:
-        batch_size = 4
-        for batch_start in range(0, len(ip_order), batch_size):
-            batch_ips = ip_order[batch_start:batch_start + batch_size]
-            targets = [(f"{base}{i}", port) for i in batch_ips for port in _SCAN_PORTS]
-            ip_range = f"{base}{batch_ips[0]}-{base}{batch_ips[-1]}"
-            log.info("Scanning batch: %s (%d targets)", ip_range, len(targets))
-            scan_log.append(f"Scanning {ip_range} ({len(targets)} targets)")
-
-            with ThreadPoolExecutor(max_workers=batch_size * 2) as pool:
-                for result in pool.map(lambda args: _check_port(*args), targets):
-                    if result is not None:
-                        devices.append(result)
-
-            if devices:
-                elapsed = round(time.time() - start_time, 1)
-                scan_log.append(f"Found {len(devices)} device(s) in {elapsed}s")
-                log.info("Scan complete: found %d device(s) in %.1fs", len(devices), elapsed)
-                return {"devices": devices, "subnets_scanned": subnets, "scan_log": scan_log}
+    devices: list[dict[str, Any]] = []
+    with ThreadPoolExecutor(max_workers=32) as pool:
+        futures = {pool.submit(_check_port, ip, port): (ip, port) for ip, port in targets}
+        for future in futures:
+            result = future.result()
+            if result is not None:
+                devices.append(result)
+                log.info("FOUND %s at %s:%d", result["device_type"], result["ip"], result["port"])
+                # Cancel remaining futures — we found a device
+                for f in futures:
+                    f.cancel()
+                break
 
     elapsed = round(time.time() - start_time, 1)
-    scan_log.append(f"Scan complete: no devices found ({elapsed}s)")
-    log.info("Scan complete: no devices found (%.1fs)", elapsed)
+    log.info("Scan complete: %d device(s) in %.1fs", len(devices), elapsed)
+    return {"devices": devices, "elapsed": elapsed}
     return {"devices": [], "subnets_scanned": subnets, "scan_log": scan_log}
 
 
