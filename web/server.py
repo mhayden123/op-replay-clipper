@@ -238,7 +238,7 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
 # ---------------------------------------------------------------------------
 
 _SCAN_PORTS = [8022, 22]  # comma 3X on 8022, comma 4 on 22
-_SCAN_TIMEOUT = 0.5
+_SCAN_TIMEOUT = 1.0
 _DEVICE_TYPE = {8022: "comma 3X", 22: "comma 4"}
 
 
@@ -306,7 +306,7 @@ def _scan_subnet(base: str) -> list[dict[str, Any]]:
 
     targets = [(f"{base}{i}", port) for i in range(1, 255) for port in _SCAN_PORTS]
 
-    with ThreadPoolExecutor(max_workers=128) as pool:
+    with ThreadPoolExecutor(max_workers=64) as pool:
         for result in pool.map(probe, targets):
             if result is not None:
                 results.append(result)
