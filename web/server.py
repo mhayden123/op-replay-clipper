@@ -7,8 +7,11 @@ import json
 import os
 import re
 import shutil
+import socket
+import struct
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -94,6 +97,7 @@ class ClipRequestBody(BaseModel):
     jwt_token: str = ""
     download_source: str = "connect"
     device_ip: str = ""
+    ssh_port: int = 22
 
 
 class JobResponse(BaseModel):
@@ -159,7 +163,7 @@ def _build_docker_cmd(job: Job, req: ClipRequestBody) -> list[str]:
         cmd.extend(["-j", req.jwt_token])
 
     if is_ssh:
-        cmd.extend(["--download-source", "ssh", "--device-ip", req.device_ip])
+        cmd.extend(["--download-source", "ssh", "--device-ip", req.device_ip, "--ssh-port", str(req.ssh_port)])
 
     return cmd
 
@@ -230,6 +234,87 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Device discovery helpers
+# ---------------------------------------------------------------------------
+
+_SCAN_PORTS = [8022, 22]  # comma 3X on 8022, comma 4 on 22
+_SCAN_TIMEOUT = 0.5
+_DEVICE_TYPE = {8022: "comma 3X", 22: "comma 4"}
+
+
+def _detect_subnets() -> list[str]:
+    """Detect LAN subnets to scan. Returns list of /24 base IPs like '192.168.1.'."""
+    bases: set[str] = set()
+
+    # Docker Desktop (macOS/Windows): resolve host.docker.internal
+    try:
+        host_ip = socket.gethostbyname("host.docker.internal")
+        prefix = host_ip.rsplit(".", 1)[0] + "."
+        bases.add(prefix)
+    except socket.gaierror:
+        pass
+
+    # Linux: parse /proc/net/route for default gateway
+    try:
+        with open("/proc/net/route") as f:
+            for line in f:
+                fields = line.strip().split()
+                if len(fields) >= 3 and fields[1] == "00000000":
+                    # Default route — gateway is in fields[2] as hex
+                    gw_hex = fields[2]
+                    gw_bytes = struct.pack("<I", int(gw_hex, 16))
+                    gw_ip = socket.inet_ntoa(gw_bytes)
+                    prefix = gw_ip.rsplit(".", 1)[0] + "."
+                    bases.add(prefix)
+                    break
+    except (FileNotFoundError, ValueError):
+        pass
+
+    # Also check the container's own IP interfaces
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if not ip.startswith("127.") and not ip.startswith("172."):
+                prefix = ip.rsplit(".", 1)[0] + "."
+                bases.add(prefix)
+    except socket.gaierror:
+        pass
+
+    return list(bases) if bases else []
+
+
+def _check_port(ip: str, port: int) -> dict[str, Any] | None:
+    """Try to connect to ip:port and verify it's an SSH service."""
+    try:
+        with socket.create_connection((ip, port), timeout=_SCAN_TIMEOUT) as s:
+            s.settimeout(_SCAN_TIMEOUT)
+            banner = s.recv(256).decode("utf-8", errors="replace").strip()
+            if "SSH" in banner.upper():
+                return {"ip": ip, "port": port, "device_type": _DEVICE_TYPE.get(port, "unknown"), "banner": banner}
+    except (OSError, socket.timeout):
+        pass
+    return None
+
+
+def _scan_subnet(base: str) -> list[dict[str, Any]]:
+    """Scan a /24 subnet for SSH services on comma device ports."""
+    results: list[dict[str, Any]] = []
+
+    def probe(args: tuple[str, int]) -> dict[str, Any] | None:
+        return _check_port(*args)
+
+    targets = [(f"{base}{i}", port) for i in range(1, 255) for port in _SCAN_PORTS]
+
+    with ThreadPoolExecutor(max_workers=128) as pool:
+        for result in pool.map(probe, targets):
+            if result is not None:
+                results.append(result)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -248,6 +333,46 @@ async def health() -> dict[str, Any]:
         "image": image_ok,
         "image_name": CLIPPER_IMAGE,
     }
+
+
+@app.post("/api/scan-devices")
+async def scan_devices() -> dict[str, Any]:
+    """Scan the local network for comma devices with SSH enabled."""
+    loop = asyncio.get_event_loop()
+    subnets = await loop.run_in_executor(None, _detect_subnets)
+    if not subnets:
+        return {"devices": [], "subnets_scanned": [], "error": "Could not detect local network subnet."}
+
+    devices: list[dict[str, Any]] = []
+    for base in subnets:
+        found = await loop.run_in_executor(None, _scan_subnet, base)
+        devices.extend(found)
+
+    # Deduplicate by ip+port
+    seen: set[str] = set()
+    unique: list[dict[str, Any]] = []
+    for d in devices:
+        key = f"{d['ip']}:{d['port']}"
+        if key not in seen:
+            seen.add(key)
+            unique.append(d)
+
+    return {"devices": unique, "subnets_scanned": subnets}
+
+
+class TestSSHRequest(BaseModel):
+    ip: str
+    port: int = 22
+
+
+@app.post("/api/test-ssh")
+async def test_ssh(body: TestSSHRequest) -> dict[str, Any]:
+    """Test SSH connectivity to a specific device."""
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _check_port, body.ip, body.port)
+    if result:
+        return {"success": True, "message": f"Connected — {result['device_type']} detected", "device_type": result["device_type"]}
+    return {"success": False, "message": f"Cannot reach device at {body.ip}:{body.port}"}
 
 
 class EstimateRequest(BaseModel):

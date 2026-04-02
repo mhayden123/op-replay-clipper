@@ -62,6 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--accel", choices=["auto", "cpu", "videotoolbox", "nvidia"], default="auto")
     parser.add_argument("--download-source", choices=["connect", "ssh"], default="connect", help="Download route data from Comma Connect or via SSH from the device.")
     parser.add_argument("--device-ip", default="", help="IP address of the comma device (required when --download-source=ssh).")
+    parser.add_argument("--ssh-port", type=int, default=22, help="SSH port on the comma device (22 for comma 4, 8022 for comma 3X).")
     return parser
 
 
@@ -133,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 skip_download=args.skip_download,
                 download_source=args.download_source,
                 device_ip=args.device_ip or None,
+                ssh_port=args.ssh_port,
             )
         )
     except ModuleNotFoundError as error:

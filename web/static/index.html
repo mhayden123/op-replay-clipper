@@ -197,6 +197,49 @@
   }
   input::placeholder { color: var(--text-muted); opacity: 0.5; }
 
+  /* ===== SSH scan & status ===== */
+  .ip-input-wrap {
+    position: relative;
+  }
+  .ip-input-wrap input {
+    padding-right: 40px;
+  }
+  .btn-scan-icon {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+  }
+  .btn-scan-icon:hover { color: var(--accent); }
+  .btn-scan-icon.scanning { pointer-events: none; }
+  .btn-scan-icon .scan-spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ssh-status {
+    font-size: 12px;
+    margin-top: 6px;
+    font-weight: 500;
+    min-height: 18px;
+  }
+  .ssh-status.success { color: var(--green); }
+  .ssh-status.error { color: var(--red); }
+  .ssh-status.scanning { color: var(--text-muted); opacity: 0.7; }
+
   .row { display: flex; gap: 16px; }
   .row > .field { flex: 1; min-width: 0; }
 
@@ -466,7 +509,16 @@
           </div>
           <div class="field" id="deviceIpField" style="display:none;">
             <label for="deviceIp">Device IP Address</label>
-            <input type="text" id="deviceIp" placeholder="e.g. 192.168.1.11" autocomplete="off" spellcheck="false">
+            <div class="ip-input-wrap">
+              <input type="text" id="deviceIp" placeholder="e.g. 192.168.1.11" autocomplete="off" spellcheck="false">
+              <button type="button" class="btn-scan-icon" id="btnScan" onclick="scanDevices()" title="Scan network for comma devices">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </button>
+            </div>
+            <div class="ssh-status" id="sshStatus"></div>
             <div class="hint">Your comma device on the local network.</div>
           </div>
         </div>
@@ -630,8 +682,10 @@
   };
   let currentRenderType = "ui";
   let currentDownloadSource = "connect";
+  let currentSshPort = 22;
   let currentJobId = null;
   let eventSource = null;
+  let sshTestTimer = null;
 
   // ===== Health check =====
   async function checkHealth() {
@@ -651,6 +705,83 @@
     document.getElementById("warningText").textContent = message;
     document.getElementById("warningBanner").classList.add("visible");
   }
+
+  // ===== SSH device scanning & testing =====
+  function setSshStatus(msg, type) {
+    const el = document.getElementById("sshStatus");
+    el.textContent = msg;
+    el.className = "ssh-status" + (type ? " " + type : "");
+  }
+
+  function setScanIcon(scanning) {
+    const btn = document.getElementById("btnScan");
+    if (scanning) {
+      btn.classList.add("scanning");
+      btn.innerHTML = '<div class="scan-spinner"></div>';
+    } else {
+      btn.classList.remove("scanning");
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+    }
+  }
+
+  async function scanDevices() {
+    setScanIcon(true);
+    setSshStatus("Scanning network...", "scanning");
+    try {
+      const res = await fetch("/api/scan-devices", { method: "POST" });
+      const data = await res.json();
+      if (data.error && !data.devices.length) {
+        setSshStatus(data.error, "error");
+      } else if (data.devices.length === 0) {
+        setSshStatus("No comma devices found on network.", "error");
+      } else {
+        const dev = data.devices[0];
+        document.getElementById("deviceIp").value = dev.ip;
+        currentSshPort = dev.port;
+        setSshStatus("Found " + dev.device_type + " at " + dev.ip + ":" + dev.port, "success");
+      }
+    } catch (err) {
+      setSshStatus("Scan failed: " + err.message, "error");
+    }
+    setScanIcon(false);
+  }
+
+  async function testConnection() {
+    const ip = document.getElementById("deviceIp").value.trim();
+    if (!ip) { setSshStatus("", ""); return; }
+    setSshStatus("Testing connection...", "scanning");
+    try {
+      // Test the detected port first, then the other port
+      const ports = currentSshPort === 8022 ? [8022, 22] : [22, 8022];
+      for (const port of ports) {
+        const res = await fetch("/api/test-ssh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ip, port }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          currentSshPort = port;
+          setSshStatus(data.message, "success");
+          return;
+        }
+      }
+      setSshStatus("Cannot reach device at " + ip, "error");
+    } catch (err) {
+      setSshStatus("Test failed: " + err.message, "error");
+    }
+  }
+
+  // Debounced auto-test when IP changes
+  document.addEventListener("DOMContentLoaded", () => {
+    const ipInput = document.getElementById("deviceIp");
+    ipInput.addEventListener("input", () => {
+      clearTimeout(sshTestTimer);
+      const val = ipInput.value.trim();
+      if (!val) { setSshStatus("", ""); return; }
+      sshTestTimer = setTimeout(testConnection, 800);
+    });
+  });
 
   // ===== View swap =====
   function showView(id) {
@@ -825,6 +956,7 @@
       jwt_token: document.getElementById("jwtToken").value.trim(),
       download_source: currentDownloadSource,
       device_ip: deviceIp,
+      ssh_port: currentSshPort,
     };
 
     try {

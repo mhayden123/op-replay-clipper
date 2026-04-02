@@ -388,20 +388,22 @@ _SSH_FILE_MAP = {
 DEVICE_ROUTE_DIR = "/data/media/0/realdata"
 
 
-def _ssh_cmd(device_ip: str) -> list[str]:
+def _ssh_cmd(device_ip: str, port: int = 22) -> list[str]:
     return [
         "ssh",
+        "-p", str(port),
         "-o", "StrictHostKeyChecking=no",
         "-o", "ConnectTimeout=10",
         f"comma@{device_ip}",
     ]
 
 
-def _scp_file(device_ip: str, remote_path: str, local_path: Path) -> bool:
+def _scp_file(device_ip: str, remote_path: str, local_path: Path, port: int = 22) -> bool:
     local_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
             "scp",
+            "-P", str(port),
             "-o", "StrictHostKeyChecking=no",
             "-o", "ConnectTimeout=10",
             f"comma@{device_ip}:{remote_path}",
@@ -422,6 +424,7 @@ def download_segments_ssh(
     device_ip: str,
     file_types: Optional[List[str]] = None,
     decompress_logs: bool = True,
+    ssh_port: int = 22,
 ):
     """Download route segments directly from a comma device via SSH."""
     if file_types is None:
@@ -439,7 +442,7 @@ def download_segments_ssh(
 
     # Verify device is reachable
     check = subprocess.run(
-        _ssh_cmd(device_ip) + ["echo", "ok"],
+        _ssh_cmd(device_ip, ssh_port) + ["echo", "ok"],
         capture_output=True, text=True,
     )
     if check.returncode != 0:
@@ -449,7 +452,7 @@ def download_segments_ssh(
 
     # List available segments on the device to find the right directory names
     ls_result = subprocess.run(
-        _ssh_cmd(device_ip) + ["ls", DEVICE_ROUTE_DIR],
+        _ssh_cmd(device_ip, ssh_port) + ["ls", DEVICE_ROUTE_DIR],
         capture_output=True, text=True,
     )
     if ls_result.returncode != 0:
@@ -487,7 +490,7 @@ def download_segments_ssh(
 
                 remote_path = f"{remote_segment}/{filename}"
                 print(f"Downloading {segment_name}/{filename} from {device_ip}...")
-                if _scp_file(device_ip, remote_path, local_path):
+                if _scp_file(device_ip, remote_path, local_path, ssh_port):
                     print(f"  OK ({local_path.stat().st_size // 1024} KB)")
                     downloaded = True
                     break
