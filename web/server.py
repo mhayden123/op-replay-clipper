@@ -238,7 +238,7 @@ async def _run_container(job: Job, req: ClipRequestBody) -> None:
 # ---------------------------------------------------------------------------
 
 _SCAN_PORTS = [8022, 22]  # comma 3X on 8022, comma 4 on 22
-_SCAN_TIMEOUT = 1.0
+_SCAN_TIMEOUT = 1.5
 _DEVICE_TYPE = {8022: "comma 3X", 22: "comma 4"}
 
 
@@ -298,18 +298,27 @@ def _check_port(ip: str, port: int) -> dict[str, Any] | None:
 
 
 def _scan_subnet(base: str) -> list[dict[str, Any]]:
-    """Scan a /24 subnet for SSH services on comma device ports."""
+    """Scan a /24 subnet for SSH services on comma device ports.
+
+    Scans in small batches to avoid overwhelming Docker's NAT bridge.
+    Returns early as soon as a device is found.
+    """
     results: list[dict[str, Any]] = []
+    batch_size = 16
 
-    def probe(args: tuple[str, int]) -> dict[str, Any] | None:
-        return _check_port(*args)
+    ips = list(range(1, 255))
+    for batch_start in range(0, len(ips), batch_size):
+        batch_ips = ips[batch_start:batch_start + batch_size]
+        targets = [(f"{base}{i}", port) for i in batch_ips for port in _SCAN_PORTS]
 
-    targets = [(f"{base}{i}", port) for i in range(1, 255) for port in _SCAN_PORTS]
+        with ThreadPoolExecutor(max_workers=batch_size * 2) as pool:
+            for result in pool.map(lambda args: _check_port(*args), targets):
+                if result is not None:
+                    results.append(result)
 
-    with ThreadPoolExecutor(max_workers=64) as pool:
-        for result in pool.map(probe, targets):
-            if result is not None:
-                results.append(result)
+        # Return early if we found a device — no need to scan the rest
+        if results:
+            return results
 
     return results
 
