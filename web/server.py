@@ -621,3 +621,29 @@ async def clip_host_path(job_id: str) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="Clip not ready")
     job_dir = str(OUTPUT_DIR / job.job_id)
     return {"path": job.output_path, "folder": job_dir}
+
+
+@app.get("/api/clip/{job_id}/open-file")
+async def open_clip_file(job_id: str) -> dict[str, str]:
+    """Open the rendered clip in the system default video player."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.state != JobState.done or not job.output_path:
+        raise HTTPException(status_code=400, detail="Clip not ready")
+    import subprocess
+    subprocess.Popen(["xdg-open", job.output_path])
+    return {"status": "ok"}
+
+
+@app.get("/api/clip/{job_id}/open-folder")
+async def open_clip_folder(job_id: str) -> dict[str, str]:
+    """Open the output folder in the system file manager."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.state != JobState.done or not job.output_path:
+        raise HTTPException(status_code=400, detail="Clip not ready")
+    import subprocess
+    subprocess.Popen(["xdg-open", str(Path(job.output_path).parent)])
+    return {"status": "ok"}
