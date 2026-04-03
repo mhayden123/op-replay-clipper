@@ -1,27 +1,89 @@
 #!/usr/bin/env bash
 
-# OP Replay Clipper — Native Install Script (Phase 0)
+# OP Replay Clipper — Native Install Script
 #
-# Replicates what bootstrap_image_env.sh does inside Docker, but adapted for
-# a host Linux system (Ubuntu/Mint/Pop!_OS). Assumes NVIDIA drivers are already
-# installed and working (nvidia-smi should succeed before running this).
-#
-# Usage:
-#   chmod +x install.sh
-#   ./install.sh
-#
-# Environment variables (all optional):
-#   CLIPPER_HOME       — base directory for all clipper data (default: ~/.op-replay-clipper)
-#   OPENPILOT_ROOT     — where to clone openpilot (default: $CLIPPER_HOME/openpilot)
-#   OPENPILOT_REPO_URL — openpilot git URL (default: https://github.com/commaai/openpilot.git)
-#   OPENPILOT_BRANCH   — openpilot branch to clone (default: master)
-#   SCONS_JOBS         — parallel build jobs (default: $(nproc))
-#   SKIP_APT           — set to 1 to skip system package installation
-#   SKIP_OPENPILOT     — set to 1 to skip openpilot clone + deps
-#   SKIP_PYRAY         — set to 1 to skip patched pyray build
-#   SKIP_FONTS         — set to 1 to skip font atlas generation
+# Sets up the complete rendering environment on a host Linux system
+# (Ubuntu/Mint/Pop!_OS) without Docker. Idempotent — safe to re-run;
+# already-completed steps are detected and skipped automatically.
 
 set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+ACTION="install"
+
+show_help() {
+  cat <<'USAGE'
+Usage: ./install.sh [OPTIONS]
+
+Install the OP Replay Clipper rendering environment natively (no Docker).
+
+Options:
+  -h, --help        Show this help message and exit
+  --uninstall       Remove everything under ~/.op-replay-clipper/ (with confirmation)
+
+Environment variables (all optional):
+  CLIPPER_HOME       Base directory for all clipper data     (default: ~/.op-replay-clipper)
+  OPENPILOT_ROOT     Where to clone openpilot                (default: $CLIPPER_HOME/openpilot)
+  OPENPILOT_REPO_URL openpilot git URL                       (default: commaai/openpilot)
+  OPENPILOT_BRANCH   openpilot branch to clone               (default: master)
+  SCONS_JOBS         Parallel build jobs                     (default: $(nproc))
+  SKIP_APT=1         Skip system package installation
+  SKIP_OPENPILOT=1   Skip openpilot clone + deps + scons build
+  SKIP_PYRAY=1       Skip patched pyray build
+  SKIP_FONTS=1       Skip font atlas generation
+
+The script is idempotent — re-running it automatically skips steps that are
+already complete (openpilot cloned, scons built, pyray verified, fonts present).
+SKIP_* flags force a step to be skipped even if detection would run it.
+
+Examples:
+  ./install.sh                     # Full install (skips completed steps)
+  SKIP_APT=1 ./install.sh          # Skip apt (e.g. packages already installed)
+  ./install.sh --uninstall          # Remove clipper data
+USAGE
+}
+
+do_uninstall() {
+  local home="${CLIPPER_HOME:-${HOME}/.op-replay-clipper}"
+  if [[ ! -d "${home}" ]]; then
+    echo "Nothing to uninstall — ${home} does not exist."
+    exit 0
+  fi
+
+  echo "This will permanently delete:"
+  echo "  ${home}"
+  echo ""
+  echo "This includes the openpilot checkout, built dependencies, rendered clips,"
+  echo "and downloaded route data. The clipper source code (this repo) is NOT affected."
+  echo ""
+  du -sh "${home}" 2>/dev/null | awk '{print "  Total size: " $1}'
+  echo ""
+  read -r -p "Type 'yes' to confirm: " confirm
+  if [[ "${confirm}" != "yes" ]]; then
+    echo "Cancelled."
+    exit 0
+  fi
+
+  rm -rf "${home}"
+  echo "Removed ${home}"
+  echo "To reinstall, run: ./install.sh"
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    -h|--help)   show_help; exit 0 ;;
+    --uninstall) ACTION="uninstall" ;;
+    *)           echo "Unknown option: ${arg}"; show_help; exit 1 ;;
+  esac
+done
+
+if [[ "${ACTION}" == "uninstall" ]]; then
+  do_uninstall
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Section 1: Configuration & defaults
@@ -285,6 +347,16 @@ install_openpilot_dependencies() {
     return
   fi
 
+  # Idempotent: if the venv already exists and has packages, skip
+  if [[ -x "${OPENPILOT_ROOT}/.venv/bin/python" ]]; then
+    local pkg_count
+    pkg_count="$("${OPENPILOT_ROOT}/.venv/bin/python" -c "import importlib.metadata; print(len(list(importlib.metadata.distributions())))" 2>/dev/null || echo 0)"
+    if (( pkg_count > 50 )); then
+      log_step "openpilot dependencies already installed (${pkg_count} packages)"
+      return
+    fi
+  fi
+
   log_step "Installing openpilot dependencies"
   cd "${OPENPILOT_ROOT}"
 
@@ -333,21 +405,37 @@ fix_vendored_tool_permissions() {
 #   - params (openpilot parameter system)
 #   - MPC solvers (longitudinal and lateral)
 
+SCONS_TARGETS=(
+  "msgq_repo/msgq/ipc_pyx.so"
+  "msgq_repo/msgq/visionipc/visionipc_pyx.so"
+  "common/params_pyx.so"
+  "selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so"
+  "selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so"
+)
+
 build_openpilot_clip_dependencies() {
   if [[ "${SKIP_OPENPILOT:-0}" == "1" ]]; then
     log_step "Skipping openpilot scons build (SKIP_OPENPILOT=1)"
     return
   fi
 
+  # Idempotent: if all 5 .so files exist, skip the build
+  local all_built=true
+  for target in "${SCONS_TARGETS[@]}"; do
+    if [[ ! -f "${OPENPILOT_ROOT}/${target}" ]]; then
+      all_built=false
+      break
+    fi
+  done
+  if [[ "${all_built}" == "true" ]]; then
+    log_step "scons targets already built (all 5 .so files present)"
+    return
+  fi
+
   log_step "Building native openpilot clip dependencies (scons, ${SCONS_JOBS} jobs)"
   cd "${OPENPILOT_ROOT}"
 
-  uv run --no-sync scons -j"${SCONS_JOBS}" \
-    msgq_repo/msgq/ipc_pyx.so \
-    msgq_repo/msgq/visionipc/visionipc_pyx.so \
-    common/params_pyx.so \
-    selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so \
-    selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
+  uv run --no-sync scons -j"${SCONS_JOBS}" "${SCONS_TARGETS[@]}"
 
   log_ok "openpilot clip dependencies built"
 }
@@ -373,9 +461,29 @@ build_openpilot_clip_dependencies() {
 # here via a faithful shell invocation. The Python script handles all the
 # patching, cmake, and wheel building.
 
+_pyray_is_patched() {
+  # Returns 0 if the patched pyray is already correctly installed in openpilot's venv.
+  local op_python="${OPENPILOT_ROOT}/.venv/bin/python"
+  [[ -x "${op_python}" ]] || return 1
+  "${op_python}" -c "
+from pathlib import Path
+import raylib
+base = Path(raylib.__file__).resolve().parent
+build = (base / 'build.py').read_text()
+assert \"os.path.join(get_the_lib_path(), 'libraylib.a')\" in build
+assert \"'-lEGL'\" in build
+" 2>/dev/null
+}
+
 install_patched_pyray() {
   if [[ "${SKIP_PYRAY:-0}" == "1" ]]; then
     log_step "Skipping patched pyray build (SKIP_PYRAY=1)"
+    return
+  fi
+
+  # Idempotent: if the patched pyray is already verified, skip
+  if _pyray_is_patched; then
+    log_step "Patched pyray already installed and verified"
     return
   fi
 
@@ -709,6 +817,14 @@ generate_ui_fonts() {
     return
   fi
 
+  # Idempotent: if font .png files already exist, skip
+  local font_count
+  font_count="$(find "${OPENPILOT_ROOT}/selfdrive/assets/fonts" -name '*.png' 2>/dev/null | wc -l)"
+  if (( font_count >= 10 )); then
+    log_step "Font atlases already present (${font_count} files)"
+    return
+  fi
+
   log_step "Generating UI font atlases"
   cd "${OPENPILOT_ROOT}"
   uv run --no-sync python selfdrive/assets/fonts/process.py
@@ -833,18 +949,20 @@ print_summary() {
   printf '%b  Installation complete!%b\n' "${GREEN}" "${NC}"
   printf '%b%s%b\n' "${GREEN}" "============================================" "${NC}"
   printf '\n'
-  echo "Clipper home:    ${CLIPPER_HOME}"
-  echo "openpilot root:  ${OPENPILOT_ROOT}"
+  echo "Clipper home:     ${CLIPPER_HOME}"
+  echo "openpilot root:   ${OPENPILOT_ROOT}"
   echo "openpilot commit: $(cat "${OPENPILOT_ROOT}/COMMIT" 2>/dev/null || echo 'unknown')"
   printf '\n'
-  echo "Next steps (Phase 0 validation):"
-  echo "  1. Copy clipper source files into your project repo"
-  echo "     (clip.py, core/, renderers/, common/, patches/, pyproject.toml, uv.lock)"
-  echo "  2. cd into your project and run: uv sync"
-  echo "  3. Smoke test (no UI, just video transcode):"
-  echo "     uv run python clip.py forward --demo --openpilot-dir ${OPENPILOT_ROOT}"
-  echo "  4. Full test (UI render with openpilot overlay):"
-  echo "     uv run python clip.py ui --demo --openpilot-dir ${OPENPILOT_ROOT}"
+  echo "Quick start:"
+  echo "  ./start.sh                    # Launch the web UI at http://localhost:7860"
+  printf '\n'
+  echo "CLI usage:"
+  echo "  uv run python clip.py forward --demo   # Smoke test (video transcode)"
+  echo "  uv run python clip.py ui --demo        # Full UI render"
+  printf '\n'
+  echo "Management:"
+  echo "  ./install.sh                  # Re-run (idempotent, skips completed steps)"
+  echo "  ./install.sh --uninstall      # Remove ~/.op-replay-clipper/"
   printf '\n'
 }
 
@@ -855,8 +973,8 @@ print_summary() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 main() {
-  echo "OP Replay Clipper — Native Install (Phase 0)"
-  echo "============================================="
+  echo "OP Replay Clipper — Native Install"
+  echo "=================================="
   echo "Target: ${CLIPPER_HOME}"
   printf '\n'
 
