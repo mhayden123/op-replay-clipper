@@ -1,13 +1,15 @@
-# OP Replay Clipper
+# GlideKit
 
-Turn any [openpilot](https://github.com/commaai/openpilot) driving route into a shareable video clip. Paste a Comma Connect URL, pick a style, get an MP4.
+Clip. Render. Share your drives.
+
+Desktop app for rendering [openpilot](https://github.com/commaai/openpilot) drive footage into shareable video clips. Paste a Comma Connect URL, pick a style, get an MP4.
 
 Runs locally on your machine with GPU acceleration. No cloud, no Docker, no upload wait.
 
 ```bash
 # Try it right now with a public demo route
-git clone https://github.com/mhayden123/op-replay-clipper-native.git
-cd op-replay-clipper-native
+git clone https://github.com/mhayden123/glidekit.git
+cd glidekit
 ./install.sh    # one-time setup (~15 min)
 ./start.sh      # opens http://localhost:7860
 ```
@@ -36,7 +38,7 @@ Installs everything: system packages, openpilot, GPU dependencies. Idempotent �
 
 ### Windows
 
-Download the desktop app from [Releases](https://github.com/mhayden123/op-replay-clipper-desktop/releases). It installs Python, Git, FFmpeg, and the clipper automatically. Double-click and go.
+Download the desktop app from [GlideKit Desktop Releases](https://github.com/mhayden123/glidekit-desktop/releases). It installs Python, Git, FFmpeg, and the clipper automatically. Double-click and go.
 
 For camera-only renders (forward, wide, driver, 360) everything works natively. For UI renders, the app walks you through a one-time WSL setup.
 
@@ -66,7 +68,7 @@ uv run python clip.py ui "<route>" -m 0 --file-format hevc  # max quality HEVC
 
 ### Desktop App
 
-[OP Replay Clipper Desktop](https://github.com/mhayden123/op-replay-clipper-desktop/releases) wraps the web UI in a native window. Manages the server for you — no terminal.
+[GlideKit Desktop](https://github.com/mhayden123/glidekit-desktop/releases) wraps the web UI in a native window. Manages the server for you — no terminal.
 
 ## Render Types
 
@@ -78,8 +80,8 @@ uv run python clip.py ui "<route>" -m 0 --file-format hevc  # max quality HEVC
 | `forward` | Forward road camera | No |
 | `wide` | Wide angle camera | No |
 | `driver` | Driver-facing camera | No |
-| `360` | Spherical 360 from wide + driver | No |
 | `forward_upon_wide` | Forward projected onto wide via calibration | Yes |
+| `360` | Spherical 360 from wide + driver | No |
 | `360_forward_upon_wide` | 8K 360 with forward overlay | Yes |
 
 ## Platform Support
@@ -100,8 +102,8 @@ uv run python clip.py ui "<route>" -m 0 --file-format hevc  # max quality HEVC
 
 ## Credits
 
-Built on [nelsonjchen's](https://github.com/nelsonjchen) op-replay-clipper. Uses [openpilot](https://github.com/commaai/openpilot) by comma.ai, replay tooling by [deanlee](https://github.com/deanlee), and headless rendering patches by [ntegan1](https://github.com/ntegan1).
+Built on [nelsonjchen's](https://github.com/nelsonjchen) op-replay-clipper. Uses [openpilot](https://github.com/commaai/openpilot) by [comma.ai](https://github.com/commaai), replay tooling by [deanlee](https://github.com/deanlee), and headless rendering patches by [ntegan1](https://github.com/ntegan1).
 
 ## License
 
-[LICENSE.md](https://github.com/mhayden123/op-replay-clipper/blob/main/LICENSE.md)
+[LICENSE.md](https://github.com/mhayden123/glidekit/blob/main/LICENSE.md)
