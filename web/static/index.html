@@ -460,6 +460,8 @@
   }
   .terminal .line { white-space: pre-wrap; word-break: break-all; }
   .terminal .line::before { content: "$ "; color: rgba(34,160,107,0.2); }
+  .terminal .line.error { color: #dc2626; }
+  .terminal .line.error::before { color: rgba(220,38,38,0.3); }
 
   .terminal::-webkit-scrollbar { width: 5px; }
   .terminal::-webkit-scrollbar-track { background: transparent; }
@@ -619,7 +621,7 @@
             </div>
             <div class="icon-tile" data-name="forward" onclick="selectTile(this)">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              <span class="tile-label">Forward</span>
+              <span class="tile-label">Fwd</span>
             </div>
             <div class="icon-tile" data-name="wide" onclick="selectTile(this)">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
@@ -1120,7 +1122,7 @@
   function appendLog(text) {
     const box = document.getElementById("logBox");
     const line = document.createElement("div");
-    line.className = "line";
+    line.className = "line" + (/error|fail|abort/i.test(text) ? " error" : "");
     line.textContent = text;
     box.appendChild(line);
     box.scrollTop = box.scrollHeight;
