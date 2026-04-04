@@ -18,7 +18,7 @@ shared/
 *.zst
 
 # openpilot checkout (managed by install.sh, not part of this repo)
-# Lives at ~/.op-replay-clipper/openpilot/ by default
+# Lives at ~/.glidekit/openpilot/ by default
 
 # IDE
 .vscode/
