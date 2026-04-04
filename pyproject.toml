@@ -1,5 +1,5 @@
 [project]
-name = "op-replay-clipper"
+name = "glidekit"
 version = "0.1.0"
 description = "Local tooling for openpilot replay clipping"
 requires-python = ">=3.12"

@@ -22,7 +22,7 @@ if [[ ! -d ".venv" ]]; then
 fi
 
 echo ""
-echo "  OP Replay Clipper (native)"
+echo "  GlideKit (native)"
 echo "  http://localhost:${PORT}"
 echo "  Press Ctrl+C to stop"
 echo ""

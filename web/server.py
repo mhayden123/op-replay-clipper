@@ -1,4 +1,4 @@
-"""FastAPI backend for the OP Replay Clipper."""
+"""FastAPI backend for GlideKit."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-app = FastAPI(title="OP Replay Clipper")
+app = FastAPI(title="GlideKit")
 log = logging.getLogger("clipper.server")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -50,7 +50,7 @@ STANDALONE_RENDER_TYPES = {"forward", "wide", "driver", "360"}
 # ---------------------------------------------------------------------------
 
 # Base directory for all clipper data.
-CLIPPER_HOME = Path(os.environ.get("CLIPPER_HOME", Path.home() / ".op-replay-clipper"))
+CLIPPER_HOME = Path(os.environ.get("CLIPPER_HOME", Path.home() / ".glidekit"))
 
 # Where job output files are written.  Each job gets a subdirectory.
 OUTPUT_DIR = Path(os.environ.get("CLIPPER_OUTPUT_DIR", CLIPPER_HOME / "output"))
@@ -287,7 +287,7 @@ def _build_clip_cmd(job: Job, req: ClipRequestBody) -> tuple[list[str], str | No
 
         wsl_cmd_str = " ".join(inner_args)
         cmd = ["wsl.exe", "-d", "Ubuntu", "--", "bash", "-c",
-               f"cd ~/.op-replay-clipper-native && {wsl_cmd_str}"]
+               f"cd ~/glidekit && {wsl_cmd_str}"]
         return cmd, None  # cwd=None for WSL, it handles its own directory
 
     # Native execution
@@ -752,13 +752,13 @@ def _wsl_status_sync() -> dict[str, Any]:
     # Check if clipper is installed inside WSL
     code, _, _ = _wsl_run(
         ["-d", distro, "--", "test", "-f",
-         os.path.expanduser("~/.op-replay-clipper-native/clip.py").replace("\\", "/")],
+         os.path.expanduser("~/glidekit/clip.py").replace("\\", "/")],
         timeout=5,
     )
     # The path inside WSL is the WSL user's home, not the Windows home
     if code != 0:
         code, _, _ = _wsl_run(
-            ["-d", distro, "--", "bash", "-c", "test -f ~/op-replay-clipper-native/clip.py"],
+            ["-d", distro, "--", "bash", "-c", "test -f ~/glidekit/clip.py"],
             timeout=5,
         )
     if code == 0:
@@ -768,7 +768,7 @@ def _wsl_status_sync() -> dict[str, Any]:
     if result["clipper_installed"]:
         code, _, _ = _wsl_run(
             ["-d", distro, "--", "bash", "-c",
-             "test -f ~/.op-replay-clipper/openpilot/.venv/bin/python"],
+             "test -f ~/.glidekit/openpilot/.venv/bin/python"],
             timeout=5,
         )
         if code == 0:
@@ -834,13 +834,13 @@ async def wsl_setup_clipper() -> StreamingResponse:
             "echo '==> Installing system packages'; "
             "sudo apt-get update -y && sudo apt-get install -y git curl build-essential; "
             "echo '==> Cloning clipper'; "
-            "if [ -d ~/op-replay-clipper-native ]; then "
-            "  cd ~/op-replay-clipper-native && git pull; "
+            "if [ -d ~/glidekit ]; then "
+            "  cd ~/glidekit && git pull; "
             "else "
-            "  git clone https://github.com/mhayden123/op-replay-clipper-native.git ~/op-replay-clipper-native; "
+            "  git clone https://github.com/mhayden123/glidekit.git ~/glidekit; "
             "fi; "
             "echo '==> Running install.sh'; "
-            "cd ~/op-replay-clipper-native && ./install.sh; "
+            "cd ~/glidekit && ./install.sh; "
             "echo '==> Setup complete'"
         )
 

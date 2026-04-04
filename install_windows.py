@@ -1,6 +1,6 @@
-"""OP Replay Clipper — Windows Installer
+"""GlideKit — Windows Installer
 
-Sets up the clipper for non-UI render types (forward, wide, driver, 360, etc.)
+Sets up GlideKit for non-UI render types (forward, wide, driver, 360, etc.)
 on Windows. UI render types (ui, ui-alt, driver-debug) require WSL with the
 full Linux install — this script detects WSL and reports its availability.
 
@@ -25,7 +25,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 
-CLIPPER_HOME = Path(os.environ.get("CLIPPER_HOME", Path.home() / ".op-replay-clipper"))
+CLIPPER_HOME = Path(os.environ.get("CLIPPER_HOME", Path.home() / ".glidekit"))
 FFMPEG_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
 
 
@@ -120,7 +120,7 @@ def setup_directories() -> None:
 
     config = CLIPPER_HOME / "config.env"
     config.write_text(
-        f"# OP Replay Clipper — Windows Configuration\n"
+        f"# GlideKit — Windows Configuration\n"
         f"CLIPPER_HOME={CLIPPER_HOME}\n"
         f"CLIPPER_OUTPUT_DIR={CLIPPER_HOME / 'output'}\n"
         f"CLIPPER_DATA_DIR={CLIPPER_HOME / 'data'}\n"
@@ -207,7 +207,7 @@ def do_uninstall() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="OP Replay Clipper — Windows Installer")
+    parser = argparse.ArgumentParser(description="GlideKit — Windows Installer")
     parser.add_argument("--uninstall", action="store_true", help="Remove clipper data")
     args = parser.parse_args()
 
@@ -215,7 +215,7 @@ def main() -> None:
         do_uninstall()
         return
 
-    print("OP Replay Clipper — Windows Install")
+    print("GlideKit — Windows Install")
     print("====================================")
     print(f"Target: {CLIPPER_HOME}")
 

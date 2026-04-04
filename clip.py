@@ -27,7 +27,7 @@ except ImportError:
     _openpilot_available = False
 
     def default_local_openpilot_root() -> str:
-        return str(Path.home() / ".op-replay-clipper" / "openpilot")
+        return str(Path.home() / ".glidekit" / "openpilot")
 
     def default_openpilot_branch() -> str:
         return "master"

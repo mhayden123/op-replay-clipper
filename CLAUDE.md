@@ -1,4 +1,4 @@
-# OP Replay Clipper -- Project Reference
+# GlideKit -- Project Reference
 
 > Reference document for Claude Code sessions. Describes architecture,
 > build process, API contracts, and platform-specific details.
@@ -23,7 +23,7 @@ Desktop App or Browser
    - FFmpeg for encoding (NVENC or libx264)
         |
         v
-   Output to ~/.op-replay-clipper/output/
+   Output to ~/.glidekit/output/
 ```
 
 ---
@@ -68,7 +68,7 @@ container environments and conflicts with host NVIDIA drivers.
 
 ### Step 2: Clone openpilot (shallow, master HEAD)
 - Shallow partial clone: `--depth 1 --filter=blob:none --recurse-submodules`
-- Destination: `~/.op-replay-clipper/openpilot/`
+- Destination: `~/.glidekit/openpilot/`
 
 ### Step 3: Install openpilot Dependencies
 Calls openpilot's `tools/setup_dependencies.sh` which runs `uv sync --frozen --all-extras`.
@@ -162,11 +162,11 @@ ssh_port: int = 22
 
 ### Windows
 - Non-UI renders run natively (Python + FFmpeg only)
-- UI renders invoke WSL: `wsl.exe -d Ubuntu -- bash -c "cd ~/op-replay-clipper-native && uv run python clip.py ..."`
+- UI renders invoke WSL: `wsl.exe -d Ubuntu -- bash -c "cd ~/glidekit && uv run python clip.py ..."`
 - Output paths converted from Windows to /mnt/c/ for WSL access
 - subprocess.Popen used instead of asyncio (ProactorEventLoop pipe reading is unreliable)
 - Raw chunk reading (4KB) with \r/\n splitting for ffmpeg progress
-- Registry key `HKCU\Software\OP Replay Clipper` tracks install paths
+- Registry key `HKCU\Software\GlideKit` tracks install paths
 
 ### macOS
 - VideoToolbox for hardware acceleration
@@ -189,7 +189,7 @@ ssh_port: int = 22
 2. **Patched pyray is critical** -- normal `pip install pyray` won't work for headless
    rendering. The EGL pbuffer patches enable `OPENPILOT_UI_NULL_EGL=1`.
 
-3. **Two separate venvs** -- openpilot's venv (`~/.op-replay-clipper/openpilot/.venv/`)
+3. **Two separate venvs** -- openpilot's venv (`~/.glidekit/openpilot/.venv/`)
    is separate from the clipper's venv (`./venv/`). The pyray wheel, scons .so files,
    and fonts live in openpilot's venv. Don't mix them.
 
