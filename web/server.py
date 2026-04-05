@@ -318,7 +318,6 @@ def _scan_for_devices() -> dict[str, Any]:
     elapsed = round(time.time() - start_time, 1)
     log.info("Scan complete: %d device(s) in %.1fs", len(devices), elapsed)
     return {"devices": devices, "elapsed": elapsed}
-    return {"devices": [], "subnets_scanned": subnets, "scan_log": scan_log}
 
 
 # ---------------------------------------------------------------------------
